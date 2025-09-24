@@ -1,0 +1,72 @@
+# ------------------------
+# Python bytecode
+# ------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ------------------------
+# Virtual environments
+# ------------------------
+.venv/
+env/
+venv/
+
+# ------------------------
+# Environment variables
+# ------------------------
+.env
+
+# ------------------------
+# SQLite / databases
+# ------------------------
+*.sqlite3
+app.db
+
+# ------------------------
+# Logs
+# ------------------------
+*.log
+logs/
+
+# ------------------------
+# IDE / editor configs
+# ------------------------
+.idea/
+*.iml
+.vscode/
+
+# ------------------------
+# macOS files
+# ------------------------
+.DS_Store
+
+# ------------------------
+# Coverage / testing
+# ------------------------
+htmlcov/
+.coverage
+.pytest_cache/
+
+# ------------------------
+# Distribution / packaging
+# ------------------------
+dist/
+build/
+*.egg-info/
+
+# ------------------------
+# Jupyter
+# ------------------------
+.ipynb_checkpoints/
+
+# ------------------------
+# Docker
+# ------------------------
+docker-compose.override.yml
+
+# ------------------------
+# Uvicorn / FastAPI reload / temp
+# ------------------------
+__pycache__/
