@@ -36,6 +36,7 @@ logs/
 .idea/
 *.iml
 .vscode/
+.idea
 
 # ------------------------
 # macOS files
@@ -69,4 +70,3 @@ docker-compose.override.yml
 # ------------------------
 # Uvicorn / FastAPI reload / temp
 # ------------------------
-__pycache__/
