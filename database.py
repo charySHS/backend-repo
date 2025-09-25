@@ -71,4 +71,17 @@ class UserProfile(Base):
 
     User = relationship("UserToken")
 
+# ----------------------------
+# OAuth State Table
+# ----------------------------
+class LoginState(Base):
+    __tablename__ = "login_states"
+    ID = Column(Integer, primary_key=True, index=True)
+    State = Column(String, unique=True, index=True)
+    CreatedAt = Column(DateTime, default=datetime.datetime.now(datetime.UTC))
+    ExpiresAt = Column(Float) # Store as timestamp
+
+    def IsExpired(self):
+        return time.time() > self.ExpiresAt
+
 Base.metadata.create_all(bind=engine)
