@@ -1,11 +1,11 @@
 # Imports
-from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from dotenv import load_dotenv
 
-from database import SessionLocal, UserToken
+from database import SessionLocal, UserToken, LoginState
 from typing import Optional, Dict, Any
 
 import requests, os, base64, time, secrets
@@ -110,6 +110,11 @@ def login(force: bool = False, request: Request = None) -> RedirectResponse:
     db = SessionLocal()
     userID = None
 
+    state = secrets.token_urlsafe(16)
+    expiresAt = time.time() + 300 # 5 mins
+    db.add(LoginState(State=state, ExpiresAt=expiresAt))
+    db.commit()
+
     if request:
         session = GetSessionData(request)
         if session:
@@ -129,56 +134,69 @@ def login(force: bool = False, request: Request = None) -> RedirectResponse:
         f"&response_type=code"
         f"&redirect_uri={SpotifyRedirectURL}"
         f"&scope={scope}"
+        f"&state={state}"
     )
     return RedirectResponse(authURL)
 
 @app.get("/callback")
-def callback(code: str) -> RedirectResponse:
-    payload = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": SpotifyRedirectURL
-    }
-
-    r = requests.post("https://accounts.spotify.com/api/token", data=payload, headers=MakeBasicAuthHeader())
-    if r.status_code != 200:
-        raise HTTPException(status_code=r.status_code, detail=f"Spotify token request failed: {r.text}")
-
-    tokenData = r.json()
-    accessToken = tokenData["access_token"]
-    refreshToken = tokenData["refresh_token"]
-    expiresIn = tokenData["expires_in"]
-
-    # Fetch Spotify profile for UserID + display name
-    profileResponse = requests.get(
-        "https://api.spotify.com/v1/me",
-        headers={"Authorization": f"Bearer {accessToken}"}
-    )
-    if profileResponse.status_code != 200:
-        raise HTTPException(status_code=profileResponse.status_code, detail="Failed to fetch profile")
-
-    profileData = profileResponse.json()
-    userID = profileData["id"]
-    displayName = profileData.get("display_name", "Spotify User")
-
+def callback(code: str, state: str) -> RedirectResponse:
     db = SessionLocal()
-    userToken = db.query(UserToken).filter(UserToken.UserID == userID).first()
-    if not userToken:
-        userToken = UserToken(UserID=userID)
+    try:
+        loginState = db.query(LoginState).filter(LoginState.State == state).first()
+
+        if not loginState or loginState.IsExpired():
+            db.close()
+            raise HTTPException(status_code=403, detail="Invalid or expired login state")
+
+        db.delete(loginState)
+        db.commit()
+
+        payload = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": SpotifyRedirectURL
+        }
+
+        r = requests.post("https://accounts.spotify.com/api/token", data=payload, headers=MakeBasicAuthHeader())
+        if r.status_code != 200:
+            raise HTTPException(status_code=r.status_code, detail=f"Spotify token request failed: {r.text}")
+
+        tokenData = r.json()
+        accessToken = tokenData["access_token"]
+        refreshToken = tokenData["refresh_token"]
+        expiresIn = tokenData["expires_in"]
+
+        # Fetch Spotify profile for UserID + display name
+        profileResponse = requests.get(
+            "https://api.spotify.com/v1/me",
+            headers={"Authorization": f"Bearer {accessToken}"}
+        )
+        if profileResponse.status_code != 200:
+            raise HTTPException(status_code=profileResponse.status_code, detail="Failed to fetch profile")
+
+        profileData = profileResponse.json()
+        userID = profileData["id"]
+        displayName = profileData.get("display_name", "Spotify User")
+
+        userToken = db.query(UserToken).filter(UserToken.UserID == userID).first()
+        if not userToken:
+            userToken = UserToken(UserID=userID)
+            db.add(userToken)
+
+        userToken.SetTokens(accessToken, refreshToken, expiresIn)
+
+        userToken.RestoreToken = GenerateRestoreToken()
         db.add(userToken)
+        db.commit()
 
-    userToken.SetTokens(accessToken, refreshToken, expiresIn)
+        # Set signed cookie with display name included
+        cookieVal = CreateSessionCookie(userID, extra_data={"display_name": displayName})
+        response = RedirectResponse(url="/welcome")
+        response.set_cookie("session", cookieVal, httponly=True, max_age=3600 * 24 * 7)
+        return response
 
-    userToken.RestoreToken = GenerateRestoreToken()
-    db.add(userToken)
-    db.commit()
-
-    # Set signed cookie with display name included
-    cookieVal = CreateSessionCookie(userID, extra_data={"display_name": displayName})
-    response = RedirectResponse(url="/welcome")
-    response.set_cookie("session", cookieVal, httponly=True, max_age=3600 * 24 * 7)
-    db.close()
-    return response
+    finally:
+        db.close()
 
 @app.get("/welcome")
 def welcome(request: Request) -> Dict[str, str]:
