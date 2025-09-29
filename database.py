@@ -82,6 +82,9 @@ class LoginState(Base):
     ExpiresAt = Column(Float) # Store as timestamp
 
     def IsExpired(self):
-        return time.time() > self.ExpiresAt
+        if not self.ExpiresAt:
+            return True
+
+        return time.time() > float(self.ExpiresAt)
 
 Base.metadata.create_all(bind=engine)

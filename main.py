@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from database import SessionLocal, UserToken, LoginState
 from typing import Optional, Dict, Any
 
-import requests, os, base64, time, secrets
+import requests, os, base64, time, secrets, logging
 
 # Load environment variables
 load_dotenv()
@@ -19,6 +19,9 @@ SpotifyRedirectURL = os.getenv("Spotify_Redirect_URL", "http://127.0.0.1:8888/ca
 SessionSecret = os.getenv("Session_Secret", "dev-secret-key") # use secure 256-bit value in production
 
 app = FastAPI(title="Mood Generator API")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("mood-api")
 
 app.add_middleware(
     CORSMiddleware,
@@ -108,25 +111,31 @@ def login(force: bool = False, request: Request = None) -> RedirectResponse:
         raise HTTPException(status_code=500, detail="Spotify Redirect URL is not set.")
 
     db = SessionLocal()
-    userID = None
+    try:
+        userID = None
 
-    state = secrets.token_urlsafe(16)
-    expiresAt = time.time() + 300 # 5 mins
-    db.add(LoginState(State=state, ExpiresAt=expiresAt))
-    db.commit()
+        state = secrets.token_urlsafe(24)
+        expiresAt = time.time() + 600 # 5 mins
+        loginState = LoginState(State=state, ExpiresAt=expiresAt)
+        db.add(loginState)
+        db.commit()
 
-    if request:
-        session = GetSessionData(request)
-        if session:
-            userID = session.get("user_id")
+        logger.info(f"[login] created LoginState: {state} expiresAt={expiresAt}")
 
-    if userID and not force:
-        userToken = db.query(UserToken).filter(UserToken.UserID == userID).first()
-        if userToken:
-            db.close()
-            return RedirectResponse(url="/welcome")
+        if request:
+            session = GetSessionData(request)
+            if session:
+                userID = session.get("user_id")
 
-    db.close()
+        if userID and not force:
+            userToken = db.query(UserToken).filter(UserToken.UserID == userID).first()
+            if userToken:
+                logger.info(f"[login] user {userID} already has tokens; skipping auth")
+                return RedirectResponse(url="/welcome")
+
+    finally:
+        db.close()
+
     scope = "playlist-modify-private playlist-read-private"
     authURL = (
         "https://accounts.spotify.com/authorize"
@@ -142,11 +151,22 @@ def login(force: bool = False, request: Request = None) -> RedirectResponse:
 def callback(code: str, state: str) -> RedirectResponse:
     db = SessionLocal()
     try:
+        logger.info(f"[callback] received code (len={len(code) if code else 0}) state={state}")
+
+        activeStates = [s.State for s in db.query(LoginState).all()]
+        logger.info(f"[callback] login_states in db: {activeStates}")
+
         loginState = db.query(LoginState).filter(LoginState.State == state).first()
 
-        if not loginState or loginState.IsExpired():
-            db.close()
-            raise HTTPException(status_code=403, detail="Invalid or expired login state")
+        if not loginState:
+            logger.warning(f"[callback] no LoginState matching {state}")
+            raise HTTPException(status_code=403, detail="Invalid or missing login state")
+
+        if loginState.IsExpired():
+            logger.warning(f"[callback] LoginState expired: {state}")
+            db.delete(loginState)
+            db.commit()
+            raise HTTPException(status_code=403, detail="Expired login state")
 
         db.delete(loginState)
         db.commit()
@@ -159,19 +179,22 @@ def callback(code: str, state: str) -> RedirectResponse:
 
         r = requests.post("https://accounts.spotify.com/api/token", data=payload, headers=MakeBasicAuthHeader())
         if r.status_code != 200:
+            logger.error(f"[callback] token exchange failed: {r.status_code} {r.text}")
             raise HTTPException(status_code=r.status_code, detail=f"Spotify token request failed: {r.text}")
 
         tokenData = r.json()
         accessToken = tokenData["access_token"]
         refreshToken = tokenData["refresh_token"]
-        expiresIn = tokenData["expires_in"]
+        expiresIn = tokenData["expires_in", 3600]
 
         # Fetch Spotify profile for UserID + display name
         profileResponse = requests.get(
             "https://api.spotify.com/v1/me",
-            headers={"Authorization": f"Bearer {accessToken}"}
+            headers={"Authorization": f"Bearer {accessToken}"},
+            timeout=10
         )
         if profileResponse.status_code != 200:
+            logger.error(f"[callback] profile fetch failed: {profileResponse.status_code} {profileResponse.text}")
             raise HTTPException(status_code=profileResponse.status_code, detail="Failed to fetch profile")
 
         profileData = profileResponse.json()
@@ -186,13 +209,14 @@ def callback(code: str, state: str) -> RedirectResponse:
         userToken.SetTokens(accessToken, refreshToken, expiresIn)
 
         userToken.RestoreToken = GenerateRestoreToken()
-        db.add(userToken)
         db.commit()
 
         # Set signed cookie with display name included
         cookieVal = CreateSessionCookie(userID, extra_data={"display_name": displayName})
         response = RedirectResponse(url="/welcome")
         response.set_cookie("session", cookieVal, httponly=True, max_age=3600 * 24 * 7)
+
+        logger.info(f"[callback] login successful for user {userID}")
         return response
 
     finally:
