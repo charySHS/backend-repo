@@ -345,3 +345,7 @@ async def favicon():
         return FileResponse(FilePath)
 
     return JSONResponse({"detail": "No favicon set"}, status_code=404)
+
+@app.get("/")
+async def root():
+    return {"status": "Backend is running :)"}
