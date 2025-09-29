@@ -185,7 +185,7 @@ def callback(code: str, state: str) -> RedirectResponse:
         tokenData = r.json()
         accessToken = tokenData["access_token"]
         refreshToken = tokenData["refresh_token"]
-        expiresIn = tokenData["expires_in", 3600]
+        expiresIn = tokenData.get("expires_in", 3600)
 
         # Fetch Spotify profile for UserID + display name
         profileResponse = requests.get(
