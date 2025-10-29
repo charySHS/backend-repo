@@ -13,6 +13,7 @@ import requests, os, base64, time, secrets, logging
 # Load environment variables
 load_dotenv()
 
+Frontend_URL = os.getenv("Frontend_URL", "http://localhost:5173")
 SpotifyClientID = os.getenv("Spotify_Client_ID")
 SpotifyClientSecret = os.getenv("Spotify_Client_Secret")
 SpotifyRedirectURL = os.getenv("Spotify_Redirect_URL", "http://127.0.0.1:8888/callback")
@@ -213,7 +214,8 @@ def callback(code: str, state: str) -> RedirectResponse:
 
         # Set signed cookie with display name included
         cookieVal = CreateSessionCookie(userID, extra_data={"display_name": displayName})
-        response = RedirectResponse(url="/welcome")
+
+        response = RedirectResponse(url=f"{Frontend_URL}/dashboard")
         response.set_cookie("session", cookieVal, httponly=True, max_age=3600 * 24 * 7)
 
         logger.info(f"[callback] login successful for user {userID}")
