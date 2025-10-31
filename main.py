@@ -6,6 +6,8 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from dotenv import load_dotenv
 
 from database import SessionLocal, UserToken, LoginState
+from spotify_routes import router as spotify_router
+from mood_routes import router as mood_router
 from typing import Optional, Dict, Any
 
 import requests, os, base64, time, secrets, logging
@@ -31,6 +33,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(spotify_router)
+app.include_router(mood_router)
 
 serializer = URLSafeTimedSerializer(SessionSecret)
 
@@ -137,7 +142,7 @@ def login(force: bool = False, request: Request = None) -> RedirectResponse:
     finally:
         db.close()
 
-    scope = "playlist-modify-private playlist-read-private"
+    scope = "user-read-email user-read-private user-library-modify playlist-modify-public playlist-modify-private ugc-image-upload"
     authURL = (
         "https://accounts.spotify.com/authorize"
         f"?client_id={SpotifyClientID}"
