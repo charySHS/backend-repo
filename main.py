@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from database import SessionLocal, UserToken, LoginState
 from spotify_routes import router as spotify_router
 from mood_routes import router as mood_router
+from analytics_routes import router as analytics_router
 from typing import Optional, Dict, Any
 
 import requests, os, base64, time, secrets, logging
@@ -36,6 +37,7 @@ app.add_middleware(
 
 app.include_router(spotify_router)
 app.include_router(mood_router)
+app.include_router(analytics_router)
 
 serializer = URLSafeTimedSerializer(SessionSecret)
 
